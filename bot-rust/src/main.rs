@@ -4,13 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-const TARGET_WETH: &str = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
-const TARGET_TOKEN: &str = "0x25118290e6A5f4139381D072181157035864099d";
+const _TARGET_WETH: &str = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
+const _TARGET_TOKEN: &str = "0x25118290e6A5f4139381D072181157035864099d";
 const MAX_IDLE_CYCLES: u32 = 720;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[CTO-ENGINE] Initialisation du Moteur HFT MEV Searcher - Mode Bundles Privés (Flashbots/BuilderNet)...");
+    println!("[CTO-ENGINE] Initialisation du Moteur HFT MEV Searcher...");
+
+    bot_rust::backtest::execute_backtest_suite();
 
     let rpc_url = std::env::var("RPC_WS_URL").unwrap_or_else(|_| "wss://arb-mainnet.g.alchemy.com/v2/demo".into());
     let provider = Provider::<Ws>::connect(&rpc_url).await?;
