@@ -1,0 +1,11 @@
+# Institutional MEV Searcher & HFT Flash Loan Engine (PoC)
+
+## Executive Summary
+This repository contains a high-frequency, zero-capital arbitrage engine engineered for Ethereum Layer-2 (Arbitrum) execution. The system leverages **Rust** for latency-sensitive off-chain state evaluation, **`revm`** for in-memory EVM simulation, **Solidity 0.8.20** for atomic flash loan execution (Aave V3 / Uniswap V3), and **private bundle routing** (Flashbots / BuilderNet) to mitigate toxic MEV and front-running risks.
+
+Designed specifically for Prop Firm & MEV Collective infrastructure integration under profit-sharing frameworks.
+
+---
+
+## Technical Architecture
+
