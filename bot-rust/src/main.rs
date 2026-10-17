@@ -3,14 +3,13 @@ use ethers::providers::{Provider, Ws};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-
-const _TARGET_WETH: &str = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
-const _TARGET_TOKEN: &str = "0x25118290e6A5f4139381D072181157035864099d";
-const MAX_IDLE_CYCLES: u32 = 720;
+use bot_rust::config::EngineConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[CTO-ENGINE] Initialisation du Moteur HFT MEV Searcher...");
+
+    let config = EngineConfig::load_production_profile();
 
     bot_rust::backtest::execute_backtest_suite();
 
@@ -21,13 +20,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut idle_cycles: u32 = 0;
 
     loop {
-        if idle_cycles >= MAX_IDLE_CYCLES {
-            eprintln!("[ALERTE DISJONCTEUR] Seuil d'inactivité critique atteint. Suspension des flux d'exécution.");
+        if idle_cycles >= config.max_idle_cycles {
+            eprintln!("[ALERTE DISJONCTEUR] Seuil d'inactivité critique atteint ({} cycles). Suspension des flux.", config.max_idle_cycles);
             break;
         }
 
-        match check_market_spread(&client).await {
-            Ok(Some((spread, expected_profit))) if spread > 1.5 => {
+        match check_market_spread(&client, &config).await {
+            Ok(Some((spread, expected_profit))) if config.validate_spread(spread) => {
                 idle_cycles = 0;
                 println!("[EXÉCUTION] Spread validé: {:.3}% | Profit net estimé: {} wei", spread, expected_profit);
 
@@ -50,11 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn check_market_spread(_client: &Arc<Provider<Ws>>) -> Result<Option<(f64, U256)>, Box<dyn std::error::Error>> {
+async fn check_market_spread(_client: &Arc<Provider<Ws>>, _config: &EngineConfig) -> Result<Option<(f64, U256)>, Box<dyn std::error::Error>> {
     let simulated_spread = 0.0;
     let simulated_profit = U256::zero();
 
-    if simulated_spread > 1.5 {
+    if simulated_spread >= 1.5 {
         Ok(Some((simulated_spread, simulated_profit)))
     } else {
         Ok(None)
