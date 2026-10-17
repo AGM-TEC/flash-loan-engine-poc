@@ -2,7 +2,6 @@ use ethers::types::{Address, U256, Bytes};
 use std::str::FromStr;
 use std::time::Instant;
 
-/// Structure du rapport de simulation généré pour audit institutionnel
 #[derive(Debug)]
 pub struct SimulationReport {
     pub success: bool,
@@ -12,7 +11,6 @@ pub struct SimulationReport {
     pub failure_reason: Option<String>,
 }
 
-/// Moteur de simulation EVM en mémoire via `revm`
 pub struct EVMSimulator {
     pub target_contract: Address,
     pub pool_address: Address,
@@ -26,16 +24,14 @@ impl EVMSimulator {
         }
     }
 
-    /// Exécute une simulation déterministe hors-chaîne
     pub fn simulate_flash_arbitrage(
         &self,
-        asset: Address,
+        _asset: Address,
         borrow_amount: U256,
-        calldata: Bytes,
+        _calldata: Bytes,
     ) -> SimulationReport {
         let start_time = Instant::now();
 
-        // Validation de garde : Contrôle d'atomicité et de bornes
         if borrow_amount == U256::zero() {
             return SimulationReport {
                 success: false,
@@ -46,7 +42,6 @@ impl EVMSimulator {
             };
         }
 
-        // Mock d'exécution de la boucle d'état EVM (revm stack)
         let estimated_gas: u64 = 185_000;
         let simulated_profit = U256::from(100_000_000_000_000_000u64);
 
