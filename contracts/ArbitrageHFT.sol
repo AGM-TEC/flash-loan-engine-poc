@@ -1,61 +1,134 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-interface IPool {
-    function flashLoanSimple(address receiverAddress, address asset, uint256 amount, bytes calldata params, uint16 referralCode) external;
-}
+pragma solidity 0.8.20;
 
 interface IERC20 {
+    function transfer(address recipient, uint256 amount) external returns (bool);
     function approve(address spender, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
-    function transfer(address recipient, uint256 amount) external returns (bool);
+}
+
+interface IPool {
+    function flashLoanSimple(
+        address receiverAddress,
+        address asset,
+        uint256 amount,
+        bytes calldata params,
+        uint16 referralCode
+    ) external;
+}
+
+interface ISwapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
 contract ArbitrageHFT {
     address public immutable owner;
-    IPool public immutable aavePool;
+    address public immutable pool;
 
-    constructor(address _aavePool) {
+    event ArbitrageExecuted(address indexed asset, uint256 amountBorrowed, uint256 profitGenerated);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "ERR_UNAUTHORIZED");
+        _;
+    }
+
+    modifier onlyPool() {
+        require(msg.sender == pool, "ERR_INVALID_CALLER");
+        _;
+    }
+
+    constructor(address _pool) {
         owner = msg.sender;
-        aavePool = IPool(_aavePool);
+        pool = _pool;
     }
 
-    // Point d'entrée déclenché par le bot Rust
-    function executeArbitrage(address asset, uint256 amount, address dexTarget, bytes calldata dexData) external {
-        require(msg.sender == owner, "AUTH_FAILED");
-        bytes memory params = abi.encode(dexTarget, dexData);
+    /// @notice Point d'exécution atomique rappelé par le protocole de prêt flash
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external onlyPool returns (bool) {
+        require(initiator == address(this), "ERR_INVALID_INITIATOR");
+
+        // Décodage des paramètres d'arbitrage inter-DEX
+        (
+            address routerA,
+            address routerB,
+            address intermediaryToken,
+            uint24 feeA,
+            uint24 feeB,
+            uint256 minProfit
+        ) = abi.decode(params, (address, address, address, uint24, uint24, uint256));
+
+        // Étape 1 : Swap initial sur le DEX A (emprunt converti en actif cible)
+        IERC20(asset).approve(routerA, amount);
         
-        aavePool.flashLoanSimple(
-            address(this),
-            asset,
-            amount,
-            params,
-            0
-        );
-    }
+        ISwapRouter.ExactInputSingleParams memory paramsA = ISwapRouter.ExactInputSingleParams({
+            tokenIn: asset,
+            tokenOut: intermediaryToken,
+            fee: feeA,
+            recipient: address(this),
+            deadline: block.timestamp,
+            amountIn: amount,
+            amountOutMinimum: 1,
+            sqrtPriceLimitX96: 0
+        });
 
-    // Fonction de rappel (Callback) imposée par Aave V3
-    function executeOperation(address asset, uint256 amount, uint256 premium, address initiator, bytes calldata params) external returns (bool) {
-        require(msg.sender == address(aavePool), "UNTRUSTED_CALLER");
-        require(initiator == address(this), "UNTRUSTED_INITIATOR");
+        uint256 intermediaryBalance = ISwapRouter(routerA).exactInputSingle(paramsA);
 
-        (address dexTarget, bytes memory dexData) = abi.decode(params, (address, bytes));
+        // Étape 2 : Swap de bouclage sur le DEX B (reconversion en actif d'emprunt)
+        IERC20(intermediaryToken).approve(routerB, intermediaryBalance);
 
-        // Exécution de l'arbitrage sur le DEX
-        (bool success, ) = dexTarget.call(dexData);
-        require(success, "DEX_ROUTING_FAILED");
+        ISwapRouter.ExactInputSingleParams memory paramsB = ISwapRouter.ExactInputSingleParams({
+            tokenIn: intermediaryToken,
+            tokenOut: asset,
+            fee: feeB,
+            recipient: address(this),
+            deadline: block.timestamp,
+            amountIn: intermediaryBalance,
+            amountOutMinimum: 1,
+            sqrtPriceLimitX96: 0
+        });
 
-        // Remboursement du capital et des frais (0.05%)
-        uint256 amountToRepay = amount + premium;
-        IERC20(asset).approve(address(aavePool), amountToRepay);
+        uint256 finalBalance = ISwapRouter(routerB).exactInputSingle(paramsB);
+        uint256 amountOwed = amount + premium;
+
+        // Contrôle strict de non-régression et de rentabilité nette
+        require(finalBalance >= amountOwed + minProfit, "ERR_INSUFFICIENT_PROFIT");
+
+        // Règlement du prêt flash et des frais de protocole
+        IERC20(asset).approve(pool, amountOwed);
+
+        // Extraction du profit net vers l'adresse institutionnelle / opérateur
+        uint256 netProfit = finalBalance - amountOwed;
+        IERC20(asset).transfer(owner, netProfit);
+
+        emit ArbitrageExecuted(asset, amount, netProfit);
 
         return true;
     }
 
-    // Extraction des bénéfices nets post-transaction
-    function extractProfit(address asset) external {
-        require(msg.sender == owner, "AUTH_FAILED");
-        uint256 balance = IERC20(asset).balanceOf(address(this));
-        IERC20(asset).transfer(owner, balance);
+    /// @notice Déclencheur initial de la ligne de prêt flash
+    function initiateArbitrage(
+        address asset,
+        uint256 amount,
+        bytes calldata params
+    ) external onlyOwner {
+        IPool(pool).flashLoanSimple(address(this), asset, amount, params, 0);
     }
+
+    receive() external payable {}
 }
